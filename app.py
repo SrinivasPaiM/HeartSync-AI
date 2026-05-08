@@ -50,21 +50,6 @@ def generate_heartbeat(beat_type, seed=None):
     
     return heartbeat.astype(np.float32)
 
-def simulate_predictions(n_samples):
-    """Simulate model predictions based on trained model's behavior"""
-    np.random.seed(42)
-    
-    probs = np.random.rand(n_samples, 5)
-    probs = probs / probs.sum(axis=1, keepdims=True)
-    
-    weights = np.array([0.82, 0.04, 0.08, 0.03, 0.03])
-    for i in range(n_samples):
-        probs[i] = probs[i] * (1 - weights) + weights * np.random.dirichlet(np.ones(5))
-        probs[i] = probs[i] / probs[i].sum()
-    
-    pred_classes = np.argmax(probs, axis=1)
-    return probs, pred_classes
-
 def generate_demo_data(n_samples=30):
     """Generate demo heartbeat dataset"""
     heartbeats = []
@@ -74,11 +59,29 @@ def generate_demo_data(n_samples=30):
     np.random.shuffle(distribution)
     
     for i, beat_type in enumerate(distribution[:n_samples]):
-        hb = generate_heartbeat(beat_type, seed=i)
+        hb = generate_heartbeat(beat_type, seed=i * 100)
         heartbeats.append(hb)
         labels.append(beat_type)
     
     return np.array(heartbeats), labels
+
+def get_predictions(n_samples):
+    """Get simulated predictions"""
+    rng = np.random.default_rng(42)
+    
+    probs = rng.random((n_samples, 5))
+    probs = probs / probs.sum(axis=1, keepdims=True)
+    
+    weights = np.array([0.82, 0.04, 0.08, 0.03, 0.03])
+    for i in range(n_samples):
+        probs[i] = probs[i] * (1 - weights) + weights * rng.dirichlet(np.ones(5))
+        probs[i] = probs[i] / probs[i].sum()
+    
+    pred_classes = np.argmax(probs, axis=1)
+    pred_labels = [CLASS_NAMES[p] for p in pred_classes]
+    confidences = probs[np.arange(n_samples), pred_classes]
+    
+    return probs, pred_labels, confidences
 
 def plot_heartbeat(heartbeat, prediction=None, confidence=0):
     """Plot a single heartbeat waveform"""
@@ -192,9 +195,7 @@ def main():
                 heartbeats, true_labels = generate_demo_data(n_samples)
             
             with st.spinner("Running classification (simulated)..."):
-                probs, pred_classes = simulate_predictions(n_samples)
-                pred_labels = [CLASS_NAMES[p] for p in pred_classes]
-                confidences = probs[np.arange(len(pred_classes)), pred_classes]
+                probs, pred_labels, confidences = get_predictions(n_samples)
             
             st.session_state['heartbeats'] = heartbeats
             st.session_state['pred_labels'] = pred_labels
@@ -214,18 +215,22 @@ def main():
             pred_labels = st.session_state['pred_labels']
             confidences = st.session_state['confidences']
             
+            n_heartbeats = len(heartbeats)
+            n_preds = len(pred_labels)
+            n_confs = len(confidences)
+            
             col_a, col_b = st.columns(2)
             with col_a:
-                st.metric("Total Heartbeats", len(heartbeats))
+                st.metric("Total Heartbeats", n_heartbeats)
             with col_b:
                 arrhythmia = sum(1 for p in pred_labels if p != 'N')
                 st.metric("Arrhythmia Detected", arrhythmia, delta="⚠️" if arrhythmia > 0 else None)
             
             df = pd.DataFrame({
-                'Beat #': range(1, len(heartbeats) + 1),
+                'Beat #': list(range(1, n_heartbeats + 1)),
                 'Prediction': [CLASS_LABELS[l] for l in pred_labels],
-                'Class': pred_labels,
-                'Confidence': [f"{c*100:.1f}%" for c in confidences]
+                'Class': list(pred_labels),
+                'Confidence': [f"{c*100:.1f}%" for c in list(confidences)]
             })
             
             with st.expander("📋 View All Predictions", expanded=True):
@@ -245,7 +250,7 @@ def main():
         
         selected = st.selectbox(
             "Select heartbeat to analyze:", 
-            range(len(heartbeats)),
+            list(range(len(heartbeats))),
             format_func=lambda x: f"Beat #{x+1} (Pred: {pred_labels[x]})"
         )
         
@@ -315,7 +320,7 @@ def main():
             st.subheader("📈 Confidence Distribution")
             
             fig, ax = plt.subplots(figsize=(6, 4))
-            ax.hist(confidences * 100, bins=10, color='#2E86AB', edgecolor='white', alpha=0.7)
+            ax.hist(list(confidences) * 100, bins=10, color='#2E86AB', edgecolor='white', alpha=0.7)
             ax.axvline(x=80, color='red', linestyle='--', label='80% threshold')
             ax.set_xlabel('Confidence (%)', fontsize=12)
             ax.set_ylabel('Count', fontsize=12)
