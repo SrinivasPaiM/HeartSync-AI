@@ -20,6 +20,9 @@ HeartSync-AI/
 ├── ecg_model_code_17_t5.h5                              # Pre-trained model
 └── README.md
 ```
+## Live Demo
+
+Link- https://heartsync-ai-sftaajnsxghmejsvgsim3d.streamlit.app/
 
 ## Quick Start - Streamlit Demo
 
