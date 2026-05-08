@@ -34,9 +34,41 @@ HeartSync AI uses a Convolutional Neural Network (CNN) with attention mechanisms
 ```
 HeartSync-AI/
 ├── Arrhythmia_Classification_Full_and_Final_Code2.ipynb  # Main notebook with complete workflow
-├── ecg_model_code 17_t5.h5                            # Pre-trained model
+├── app.py                                                # Streamlit demo web application
+├── requirements.txt                                      # Python dependencies for Streamlit app
+├── ecg_model_code 17_t5.h5                              # Pre-trained model
 ├── mit-bih-arrhythmia-database-1.0.0/                   # Dataset (48 records, 47 patients)
 └── README.md
+```
+
+## Quick Start
+
+### Streamlit Demo App
+
+Run the interactive web demo:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the app
+streamlit run app.py
+```
+
+The app features:
+- Load WFDB format ECG records for analysis
+- Demo mode with sample heartbeats (no data required)
+- View classification results with confidence scores
+- Risk assessment for each heartbeat
+- Batch visualization of multiple heartbeats
+- Detailed per-heartbeat analysis with probability distribution
+
+### Jupyter Notebook
+
+For full training and LIME explainability:
+
+```bash
+jupyter notebook Arrhythmia_Classification_Full_and_Final_Code2.ipynb
 ```
 
 ## Dataset
@@ -68,12 +100,40 @@ The MIT-BIH Arrhythmia Database is used for training and evaluation:
 
 ## Installation
 
+### For Jupyter Notebook
 ```bash
-# Required packages
 pip install wfdb pywt tensorflow scikit-learn matplotlib seaborn pandas lime scikit-image
 ```
 
+### For Streamlit App
+```bash
+pip install -r requirements.txt
+```
+
 ## Usage
+
+### Running the Demo App
+
+1. **Start the Streamlit app**:
+   ```bash
+   streamlit run app.py
+   ```
+
+2. **Choose input method**:
+   - **Demo mode**: Use pre-generated sample heartbeats (no data needed)
+   - **Load ECG**: Provide path to MIT-BIH dataset folder
+
+3. **View predictions**:
+   - See batch summary with heartbeat counts
+   - Identify arrhythmia detections
+   - View detailed probability distribution
+
+4. **Analyze specific heartbeat**:
+   - Select heartbeat number from dropdown
+   - View prediction, confidence, and risk level
+   - See ECG waveform with interpretation
+
+### Running the Notebook
 
 1. **Download the Dataset**:
    - Visit [PhysioNet MIT-BIH](https://physionet.org/content/mitdb/1.0.0/)
@@ -106,6 +166,7 @@ pip install wfdb pywt tensorflow scikit-learn matplotlib seaborn pandas lime sci
 
 ## Hardware Requirements
 
+- **CPU**: Works for inference (Streamlit demo)
 - **GPU**: Recommended (T4 or better) for training
 - **RAM**: 8GB+ recommended
 - **Storage**: ~150MB for dataset and model
@@ -133,6 +194,7 @@ If you use this project in your research, please cite:
 - [MIT-BIH Arrhythmia Database](https://physionet.org/content/mitdb/1.0.0/)
 - [AAMI Standards for Arrhythmia Classification](https://www.aami.org/)
 - [LIME: Local Interpretable Model-agnostic Explanations](https://arxiv.org/abs/1602.04938)
+- [Streamlit Documentation](https://docs.streamlit.io/)
 
 ## License
 
