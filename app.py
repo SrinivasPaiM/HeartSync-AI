@@ -28,7 +28,7 @@ CLASS_LABELS = {
     'Q': 'Unclassifiable Beat'
 }
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "ecg_model_code 17_t5.h5")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "ecg_model_code_17_t5.h5")
 
 @st.cache_resource
 def load_model():

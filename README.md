@@ -17,7 +17,7 @@ HeartSync-AI/
 ├── Arrhythmia_Classification_Full_and_Final_Code2.ipynb  # Main notebook with complete workflow
 ├── app.py                                                # Streamlit demo web application
 ├── requirements.txt                                      # Python dependencies
-├── ecg_model_code 17_t5.h5                              # Pre-trained model
+├── ecg_model_code_17_t5.h5                              # Pre-trained model
 └── README.md
 ```
 
