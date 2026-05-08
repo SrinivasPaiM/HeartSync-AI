@@ -1,17 +1,14 @@
 """
 HeartSync AI - ECG Arrhythmia Classification Demo
-Streamlit web application for real-time ECG heartbeat classification
+Streamlit web application for ECG heartbeat classification
 """
 
 import streamlit as st
 import numpy as np
 import tensorflow as tf
-import wfdb
-import pywt
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
-import tempfile
 
 st.set_page_config(
     page_title="HeartSync AI - ECG Arrhythmia Classification",
@@ -39,68 +36,55 @@ def load_model():
     except Exception as e:
         return None, str(e)
 
-def denoise_signal(data):
-    """Denoise ECG signal using Discrete Wavelet Transform"""
-    coeffs = pywt.wavedec(data=data, wavelet='db5', level=9)
-    threshold = (np.median(np.abs(coeffs[-1])) / 0.6745) * (np.sqrt(2 * np.log(len(coeffs[-1]))))
-    for i in range(len(coeffs) - 2):
-        coeffs[i] = pywt.threshold(coeffs[i], threshold)
-    return pywt.waverec(coeffs=coeffs, wavelet='db5')
-
-def segment_heartbeat(signal, r_peak_idx, window_size=300, left_samples=99, right_samples=201):
-    """Segment a single heartbeat from the ECG signal"""
-    start = r_peak_idx - left_samples
-    end = r_peak_idx + right_samples
+def generate_heartbeat(beat_type, seed=None):
+    """Generate a synthetic ECG heartbeat"""
+    if seed is not None:
+        np.random.seed(seed)
     
-    if start < 0 or end >= len(signal):
-        return None
+    t = np.linspace(0, 1, 300)
+    base = 2 * np.sin(2 * np.pi * 1.2 * t) + 0.5 * np.sin(2 * np.pi * 2.4 * t)
+    noise = np.random.normal(0, 0.05, 300)
+    heartbeat = base + noise
     
-    heartbeat = signal[start:end]
+    if beat_type == 'V':
+        heartbeat[100:150] += np.sin(np.linspace(0, 4, 50)) * 2
+        heartbeat[150:180] *= 0.3
+    elif beat_type == 'S':
+        heartbeat[80:100] *= 0.5
+        heartbeat[100:130] += np.sin(np.linspace(0, 2, 30)) * 0.5
+    elif beat_type == 'F':
+        heartbeat[90:120] += np.sin(np.linspace(0, 3, 30)) * 1.2
+        heartbeat[130:160] *= 0.7
+    elif beat_type == 'Q':
+        noise_heavy = np.random.normal(0, 0.2, 300)
+        heartbeat += noise_heavy
+        heartbeat[100:150] = np.random.choice([-1, 1], 50) * np.abs(np.sin(np.linspace(0, 3, 50)))
     
-    if len(heartbeat) == window_size:
-        return heartbeat
-    return None
+    return heartbeat.astype(np.float32)
 
-def preprocess_ecg(record_path, channel='MLII'):
-    """Load and preprocess ECG record to extract heartbeats"""
-    try:
-        record = wfdb.rdrecord(record_path)
-        annotation = wfdb.rdann(record_path, 'atr')
-        
-        if channel not in record.sig_name:
-            channel = record.sig_name[0]
-        
-        channel_idx = record.sig_name.index(channel)
-        signal = record.p_signal[:, channel_idx]
-        
-        denoised = denoise_signal(signal)
-        
-        heartbeats = []
-        r_peaks = []
-        
-        for r_peak in annotation.sample:
-            heartbeat = segment_heartbeat(denoised, r_peak)
-            if heartbeat is not None:
-                heartbeats.append(heartbeat)
-                r_peaks.append(r_peak)
-        
-        if len(heartbeats) == 0:
-            return None, None, "No valid heartbeats found in the record."
-        
-        X = np.array(heartbeats)
-        X = X.reshape(-1, 300, 1).astype(np.float32)
-        
-        mean = np.mean(X)
-        std = np.std(X)
-        X = (X - mean) / (std + 1e-8)
-        
-        return X, r_peaks, None
-        
-    except Exception as e:
-        return None, None, f"Error processing ECG: {str(e)}"
+def generate_demo_data(n_samples=50):
+    """Generate demo heartbeat dataset"""
+    heartbeats = []
+    labels = []
+    
+    distribution = ['N'] * 35 + ['S'] * 5 + ['V'] * 5 + ['F'] * 3 + ['Q'] * 2
+    np.random.shuffle(distribution)
+    
+    for i, beat_type in enumerate(distribution[:n_samples]):
+        hb = generate_heartbeat(beat_type, seed=i)
+        heartbeats.append(hb)
+        labels.append(beat_type)
+    
+    X = np.array(heartbeats)
+    X = X.reshape(-1, 300, 1)
+    
+    mean, std = np.mean(X), np.std(X)
+    X = (X - mean) / (std + 1e-8)
+    
+    return X, labels
 
-def plot_heartbeat(heartbeat, prediction=None, probabilities=None):
-    """Plot a single heartbeat with prediction info"""
+def plot_heartbeat(heartbeat, prediction=None):
+    """Plot a single heartbeat"""
     fig, ax = plt.subplots(figsize=(10, 4))
     
     ax.plot(heartbeat, color='#2E86AB', linewidth=1.5)
@@ -108,17 +92,18 @@ def plot_heartbeat(heartbeat, prediction=None, probabilities=None):
     
     ax.set_xlabel('Time Steps', fontsize=12)
     ax.set_ylabel('Normalized Amplitude', fontsize=12)
-    ax.set_title('ECG Heartbeat', fontsize=14, fontweight='bold')
-    ax.grid(True, alpha=0.3)
     
-    if prediction is not None:
-        ax.set_title(f'Predicted Class: {CLASS_LABELS[prediction]}', 
+    if prediction:
+        ax.set_title(f'Predicted: {prediction} - {CLASS_LABELS[prediction]}', 
                      fontsize=14, fontweight='bold', color='#28A745')
+    else:
+        ax.set_title('ECG Heartbeat', fontsize=14, fontweight='bold')
     
+    ax.grid(True, alpha=0.3)
     plt.tight_layout()
     return fig
 
-def plot_prediction_distribution(probs):
+def plot_probabilities(probs):
     """Plot prediction probability distribution"""
     fig, ax = plt.subplots(figsize=(8, 4))
     
@@ -131,53 +116,24 @@ def plot_prediction_distribution(probs):
                 f'{prob*100:.1f}%', va='center', fontsize=11, fontweight='bold')
     
     ax.set_xlabel('Probability (%)', fontsize=12)
-    ax.set_ylabel('Arrhythmia Class', fontsize=12)
-    ax.set_xlim(0, 105)
-    ax.set_title('Prediction Confidence Distribution', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Class', fontsize=12)
+    ax.set_xlim(0, 110)
+    ax.set_title('Prediction Confidence', fontsize=14, fontweight='bold')
     ax.grid(True, axis='x', alpha=0.3)
     
     plt.tight_layout()
     return fig
 
-def plot_multiple_heartbeats(heartbeats, predictions, max_show=10):
-    """Plot multiple heartbeats with their predictions"""
-    n = min(len(heartbeats), max_show)
-    cols = 5
-    rows = (n + cols - 1) // cols
-    
-    fig, axes = plt.subplots(rows, cols, figsize=(15, 3 * rows))
-    if rows == 1:
-        axes = axes.reshape(1, -1)
-    
-    for i in range(n):
-        row = i // cols
-        col = i % cols
-        ax = axes[row, col]
-        
-        ax.plot(heartbeats[i], color='#2E86AB', linewidth=1)
-        ax.set_title(f'Beat {i+1}: {predictions[i]}', fontsize=10)
-        ax.grid(True, alpha=0.3)
-        ax.set_xticks([])
-    
-    for i in range(n, rows * cols):
-        row = i // cols
-        col = i % cols
-        axes[row, col].axis('off')
-    
-    plt.suptitle('Sample Heartbeats with Predictions', fontsize=14, fontweight='bold', y=1.02)
-    plt.tight_layout()
-    return fig
-
-def get_arrhythmia_severity(pred_class):
-    """Return severity level based on prediction"""
-    severity = {
+def get_risk_info(pred_class):
+    """Get risk level and description"""
+    info = {
         'N': ('Low Risk', 'green', 'Normal heart rhythm - no intervention needed.'),
-        'S': ('Moderate', 'orange', 'Supraventricular premature beat - monitor and follow-up recommended.'),
-        'V': ('High Risk', 'red', 'Premature ventricular contraction - clinical evaluation advised.'),
-        'F': ('High Risk', 'red', 'Fusion beat - may indicate underlying cardiac condition.'),
-        'Q': ('Uncertain', 'gray', 'Unclassifiable beat - additional testing may be required.')
+        'S': ('Moderate', 'orange', 'Supraventricular premature beat - monitor.'),
+        'V': ('High Risk', 'red', 'Premature ventricular contraction - evaluation advised.'),
+        'F': ('High Risk', 'red', 'Fusion beat - may indicate cardiac condition.'),
+        'Q': ('Uncertain', 'gray', 'Unclassifiable beat - additional testing may be needed.')
     }
-    return severity.get(pred_class, ('Unknown', 'gray', 'Consult a cardiologist.'))
+    return info.get(pred_class, ('Unknown', 'gray', 'Consult a cardiologist.'))
 
 def main():
     st.title("❤️ HeartSync AI")
@@ -188,27 +144,24 @@ def main():
     
     if model_error:
         st.error(f"⚠️ Failed to load model: {model_error}")
-        st.info("💡 Please ensure the trained model file (`ecg_model_code 17_t5.h5`) is in the project directory.")
+        st.info("💡 Ensure `ecg_model_code_17_t5.h5` is in the project directory.")
         return
     
-    st.success("✅ Model loaded successfully!")
+    st.success("✅ Model loaded successfully! (99%+ accuracy)")
     
     with st.expander("ℹ️ About HeartSync AI", expanded=False):
         st.markdown("""
-        **HeartSync AI** is a deep learning system for automated detection and classification of cardiac arrhythmias.
+        **HeartSync AI** classifies ECG heartbeats into 5 categories:
         
-        **Model Performance:**
-        - Overall Accuracy: **99%+**
-        - Trained on MIT-BIH Arrhythmia Database
+        | Code | Class | Risk |
+        |------|-------|------|
+        | **N** | Normal | Low |
+        | **S** | Supraventricular | Moderate |
+        | **V** | Ventricular | High |
+        | **F** | Fusion | High |
+        | **Q** | Unknown | Uncertain |
         
-        **Classification Categories:**
-        | Code | Class | Description |
-        |------|-------|-------------|
-        | N | Normal | Normal heart rhythm |
-        | S | Supraventricular | Early beat from upper chambers |
-        | V | Ventricular | Early beat from lower chambers |
-        | F | Fusion | Mixed normal and abnormal beat |
-        | Q | Unknown | Unclassifiable beat |
+        Model trained on MIT-BIH Arrhythmia Database with **99%+ accuracy**.
         """)
     
     st.markdown("---")
@@ -216,206 +169,119 @@ def main():
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("📊 Dataset Information")
-        info_option = st.radio(
-            "Choose input method:",
-            ["📁 Load .dat files (WFDB format)", "📝 Demo with sample data"],
-            horizontal=True
-        )
+        st.subheader("📊 Generate Sample Data")
         
-        if info_option == "📁 Load .dat files (WFDB format)":
-            st.markdown("""
-            **To use your own ECG data:**
-            1. Download the [MIT-BIH Arrhythmia Database](https://physionet.org/content/mitdb/1.0.0/)
-            2. Place `.dat` files in a folder
-            3. Use the file path below
-            """)
-            
-            project_path = st.text_input(
-                "Dataset folder path:",
-                value="mit-bih-arrhythmia-database-1.0.0",
-                help="Path to folder containing .dat files"
-            )
-            
-            record_name = st.text_input(
-                "Record name (e.g., 100, 101, etc.):",
-                value="100"
-            )
-            
-            if st.button("🔍 Load Record", type="primary"):
-                if record_name:
-                    record_path = os.path.join(project_path, record_name)
-                    
-                    with st.spinner("Processing ECG data..."):
-                        X, r_peaks, error = preprocess_ecg(record_path, channel='MLII')
-                    
-                    if error:
-                        st.error(f"❌ Error: {error}")
-                    else:
-                        st.session_state['X'] = X
-                        st.session_state['r_peaks'] = r_peaks
-                        st.session_state['record_name'] = record_name
-                        st.success(f"✅ Loaded {len(X)} heartbeats from record {record_name}")
-        else:
-            st.info("🎲 Using pre-generated demo heartbeats for demonstration.")
-            
-            np.random.seed(42)
-            n_demo = 20
-            demo_heartbeats = []
-            demo_labels = []
-            
-            for i in range(n_demo):
-                t = np.linspace(0, 1, 300)
-                base = 2 * np.sin(2 * np.pi * 1.2 * t) + 0.5 * np.sin(2 * np.pi * 2.4 * t)
-                noise = np.random.normal(0, 0.05, 300)
-                heartbeat = base + noise
-                
-                if i % 5 == 4:
-                    heartbeat[100:130] += np.sin(np.linspace(0, 3, 30)) * 1.5
-                    demo_labels.append('V')
-                elif i % 5 == 2:
-                    heartbeat[80:100] *= 0.6
-                    demo_labels.append('S')
-                else:
-                    demo_labels.append('N')
-                
-                demo_heartbeats.append(heartbeat)
-            
-            X = np.array(demo_heartbeats, dtype=np.float32)
-            X = X.reshape(-1, 300, 1)
-            mean, std = np.mean(X), np.std(X)
-            X = (X - mean) / (std + 1e-8)
-            
-            st.session_state['X'] = X
-            st.session_state['r_peaks'] = list(range(n_demo))
-            st.session_state['record_name'] = "Demo"
-            st.success(f"✅ Generated {n_demo} sample heartbeats for demonstration")
-    
-    with col2:
-        st.subheader("🎯 Classification Results")
+        n_samples = st.slider("Number of heartbeats to generate:", 10, 100, 30)
         
-        if 'X' not in st.session_state:
-            st.info("👆 Load or generate ECG data to see classification results.")
-        else:
-            X = st.session_state['X']
-            r_peaks = st.session_state['r_peaks']
-            record_name = st.session_state.get('record_name', 'Unknown')
+        if st.button("🎲 Generate Demo Heartbeats", type="primary"):
+            with st.spinner("Generating synthetic ECG data..."):
+                X, true_labels = generate_demo_data(n_samples)
             
             with st.spinner("Running classification..."):
                 predictions = model.predict(X, verbose=0)
                 pred_classes = np.argmax(predictions, axis=1)
                 pred_labels = [CLASS_NAMES[p] for p in pred_classes]
-                confidences = [predictions[i, pred_classes[i]] for i in range(len(pred_classes))]
+                confidences = predictions[np.arange(len(pred_classes)), pred_classes]
+            
+            st.session_state['X'] = X
+            st.session_state['pred_labels'] = pred_labels
+            st.session_state['confidences'] = confidences
+            st.session_state['predictions'] = predictions
+            
+            st.success(f"✅ Generated and classified {n_samples} heartbeats!")
+    
+    with col2:
+        st.subheader("📈 Classification Results")
+        
+        if 'X' not in st.session_state:
+            st.info("👆 Click 'Generate Demo' to see classification results.")
+        else:
+            X = st.session_state['X']
+            pred_labels = st.session_state['pred_labels']
+            confidences = st.session_state['confidences']
             
             col_a, col_b = st.columns(2)
-            
             with col_a:
                 st.metric("Total Heartbeats", len(X))
-            
             with col_b:
-                arrhythmia_count = sum(1 for p in pred_labels if p != 'N')
-                st.metric("Arrhythmia Detected", arrhythmia_count)
+                arrhythmia = sum(1 for p in pred_labels if p != 'N')
+                st.metric("Arrhythmia Detected", arrhythmia)
             
-            results_df = pd.DataFrame({
+            df = pd.DataFrame({
                 'Beat #': range(1, len(X) + 1),
                 'Prediction': [CLASS_LABELS[l] for l in pred_labels],
                 'Class': pred_labels,
                 'Confidence': [f"{c*100:.1f}%" for c in confidences]
             })
             
-            with st.expander("📋 View All Predictions", expanded=True):
-                st.dataframe(results_df, use_container_width=True, hide_index=True)
+            with st.expander("📋 All Predictions", expanded=True):
+                st.dataframe(df, use_container_width=True, hide_index=True)
             
-            pred_counts = pd.Series(pred_labels).value_counts()
-            
-            fig_count, ax_count = plt.subplots(figsize=(6, 4))
-            colors = {'N': '#28A745', 'S': '#FFC107', 'V': '#DC3545', 'F': '#17A2B8', 'Q': '#6C757D'}
-            bar_colors = [colors.get(c, '#6C757D') for c in pred_counts.index]
-            ax_count.bar(pred_counts.index, pred_counts.values, color=bar_colors, edgecolor='white')
-            ax_count.set_xlabel('Class')
-            ax_count.set_ylabel('Count')
-            ax_count.set_title('Prediction Distribution')
-            for i, v in enumerate(pred_counts.values):
-                ax_count.text(i, v + 0.1, str(v), ha='center', fontweight='bold')
-            st.pyplot(fig_count)
+            counts = pd.Series(pred_labels).value_counts()
+            fig, ax = plt.subplots(figsize=(5, 3))
+            colors_map = {'N': '#28A745', 'S': '#FFC107', 'V': '#DC3545', 'F': '#17A2B8', 'Q': '#6C757D'}
+            ax.bar(counts.index, counts.values, color=[colors_map.get(c, '#6C757D') for c in counts.index])
+            ax.set_xlabel('Class')
+            ax.set_ylabel('Count')
+            ax.set_title('Prediction Distribution')
+            for i, v in enumerate(counts.values):
+                ax.text(i, v + 0.1, str(v), ha='center', fontweight='bold')
+            st.pyplot(fig)
     
     st.markdown("---")
-    
-    st.subheader("🔍 Detailed Heartbeat Analysis")
+    st.subheader("🔍 Detailed Analysis")
     
     if 'X' in st.session_state:
         X = st.session_state['X']
+        predictions = st.session_state['predictions']
         
-        col1, col2 = st.columns([1, 2])
+        selected = st.selectbox("Select heartbeat:", range(len(X)), 
+                                format_func=lambda x: f"Beat #{x+1}")
         
+        heartbeat = X[selected]
+        probs = predictions[selected]
+        pred_class = CLASS_NAMES[np.argmax(probs)]
+        confidence = probs[np.argmax(probs)] * 100
+        
+        risk_label, risk_color, risk_desc = get_risk_info(pred_class)
+        
+        col1, col2 = st.columns([1, 1])
         with col1:
-            selected_beat = st.selectbox(
-                "Select heartbeat to analyze:",
-                options=list(range(len(X))),
-                format_func=lambda x: f"Beat #{x+1}"
-            )
-        
-        heartbeat = X[selected_beat]
-        pred_probs = model.predict(heartbeat.reshape(1, 300, 1), verbose=0)[0]
-        pred_class = CLASS_NAMES[np.argmax(pred_probs)]
-        confidence = np.max(pred_probs) * 100
-        
-        severity_label, severity_color, severity_desc = get_arrhythmia_severity(pred_class)
-        
+            st.markdown(f"**🫀 Prediction:** `{pred_class}` - **{CLASS_LABELS[pred_class]}**")
+            st.markdown(f"**Confidence:** `{confidence:.1f}%`")
         with col2:
-            col_c1, col_c2 = st.columns(2)
-            
-            with col_c1:
-                st.markdown(f"**🫀 Prediction:**")
-                st.markdown(f"### {pred_class} - {CLASS_LABELS[pred_class]}")
-                st.markdown(f"**Confidence:** {confidence:.2f}%")
-            
-            with col_c2:
-                st.markdown(f"**⚠️ Risk Assessment:**")
-                st.markdown(f"### {severity_label}")
-                st.caption(severity_desc)
+            st.markdown(f"**⚠️ Risk Level:** `{risk_label}`")
+            st.caption(risk_desc)
         
-        fig1 = plot_heartbeat(heartbeat, pred_class, pred_probs)
-        st.pyplot(fig1)
-        
-        fig2 = plot_prediction_distribution(pred_probs)
-        st.pyplot(fig2)
-        
-        st.markdown("---")
-        
-        st.subheader("📊 Batch Analysis Visualization")
-        
-        if len(X) > 1:
-            fig_multi = plot_multiple_heartbeats(X, pred_labels, max_show=15)
-            st.pyplot(fig_multi)
+        col3, col4 = st.columns([1, 1])
+        with col3:
+            fig1 = plot_heartbeat(heartbeat, pred_class)
+            st.pyplot(fig1)
+        with col4:
+            fig2 = plot_probabilities(probs)
+            st.pyplot(fig2)
     else:
-        st.info("👆 Load ECG data to see detailed analysis.")
+        st.info("👆 Generate sample data to see detailed analysis.")
     
     with st.sidebar:
         st.markdown("### 🛠️ Settings")
-        
-        st.markdown("**Model Information:**")
-        st.text(f"Classes: {', '.join(CLASS_NAMES)}")
-        st.text(f"Input shape: (300, 1)")
-        st.text(f"Accuracy: 99%+")
+        st.markdown(f"**Model:** CNN with Attention")
+        st.markdown(f"**Accuracy:** 99%+")
+        st.markdown(f"**Classes:** {', '.join(CLASS_NAMES)}")
         
         st.markdown("---")
-        
-        st.markdown("### 📖 Help")
+        st.markdown("### 📖 How to Use")
         st.markdown("""
-        1. **Load Data:** Select ECG record or use demo
-        2. **View Results:** Check predictions and risk levels
-        3. **Analyze:** Select specific heartbeat for details
-        4. **Export:** Download results as CSV
+        1. Click **Generate Demo** button
+        2. View batch classification results
+        3. Select specific heartbeat for analysis
+        4. Check risk levels and confidence
         """)
         
         if st.button("🗑️ Clear Session"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
             st.rerun()
-        
-        st.markdown("---")
-        st.markdown("*HeartSync AI Demo*")
 
 if __name__ == "__main__":
     main()
